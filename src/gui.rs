@@ -123,7 +123,7 @@ impl GuiState {
         self.renderer.update_buffers(device, queue, encoder, &paint_jobs, &screen_descriptor);
 
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: surface_view,

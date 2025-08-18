@@ -1,6 +1,7 @@
-pub mod node;
 pub mod tree;
 pub mod triangle;
-pub use node::Node;
-pub use tree::Tree;
+#[cfg(test)]
+mod traversal_test;
+
+pub use tree::{Tree, Node};
 pub use triangle::Triangle;

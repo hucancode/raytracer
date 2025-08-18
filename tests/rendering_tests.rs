@@ -7,7 +7,7 @@ use std::path::Path;
 
 const TEST_WIDTH: u32 = 512;
 const TEST_HEIGHT: u32 = 512;
-const TEST_FRAMES: u32 = 1;
+const TEST_FRAMES: u32 = 10;
 const TOLERANCE_PERCENT: f32 = 2.0;
 
 /// Helper function to render a scene and compare with golden reference

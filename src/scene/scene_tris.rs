@@ -6,7 +6,8 @@ use wgpu::BufferBindingType;
 use crate::renderer::RenderOutput;
 use crate::{geometry::Mesh, renderer::Renderer};
 
-use super::{bvh::Node, bvh::Tree, bvh::Triangle, material::Material, Camera};
+use super::{bvh::{Tree, Triangle}, material::Material, Camera};
+use super::bvh::tree::Node;
 
 const MAX_TRIS: usize = 1000000;
 const MAX_MATS: usize = 1000;

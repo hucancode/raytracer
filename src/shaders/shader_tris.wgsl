@@ -23,7 +23,7 @@ var<storage, read_write> image: array<f32>;
 @group(0) @binding(4)
 var<uniform> camera: Camera;
 @group(1) @binding(0)
-var<uniform> bvh_tree_size: vec2u;
+var<uniform> bvh_info: vec2u; // x: node count, y: triangle count
 @group(1) @binding(1)
 var<storage> nodes: array<Node>;
 @group(1) @binding(2)
@@ -40,14 +40,19 @@ struct Camera {
   focal_blur_amount: f32,
   fov: f32,
 }
+
 struct Ray {
   origin: vec3f,
   direction: vec3f,
 }
+
 struct Node {
   bound_min: vec3f,
+  left_first: u32,  // MSB=1 for leaf, contains triangle start index
   bound_max: vec3f,
+  tri_count: u32,   // For leaf: triangle count, for internal: right child index
 }
+
 struct Triangle {
   a: vec4f,
   b: vec4f,
@@ -55,11 +60,13 @@ struct Triangle {
   normal: vec3f,
   material: u32,
 }
+
 struct Material {
     albedo: vec4f,
     params: vec3f,
     id: u32,
 }
+
 struct HitRecord {
   point: vec3f,
   normal: vec3f,
@@ -70,7 +77,6 @@ struct HitRecord {
 
 const DEFAULT_MATERIAL = Material(vec4f(0.0,0.4,0.0,1.0), vec3f(), MAT_LAMBERTIAN);
 const EMPTY_HIT_RECORD = HitRecord(vec3f(), vec3f(), FLT_MAX, DEFAULT_MATERIAL, false);
-const GRAY_MATERIAL = Material(vec4f(0.5,0.5,0.6,1.0), vec3f(), MAT_LAMBERTIAN);
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
@@ -80,18 +86,10 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f 
   let c = vec4f(1.0, 1.0, 0.0, 1.0);
   let d = vec4f(-1.0, 1.0, 0.0, 1.0);
   switch (vertexIndex) {
-    case 0u, 3u: {
-      return a;
-    }
-    case 1u: {
-      return b;
-    }
-    case 2u, 4u: {
-      return c;
-    }
-    case 5u, default: {
-      return d;
-    }
+    case 0u, 3u: { return a; }
+    case 1u: { return b; }
+    case 2u, 4u: { return c; }
+    case 5u, default: { return d; }
   }
   return vec4f(0.0, 0.0, 0.0, 1.0);
 }
@@ -103,19 +101,24 @@ fn rng_int(state: ptr<function, u32>) {
     let word = ((oldState >> ((oldState >> 28u) + 4u)) ^ oldState) * 277803737u;
     *state = (word >> 22u) ^ word;
 }
+
 fn rng_float(state: ptr<function, u32>) -> f32 {
     rng_int(state);
     return f32(*state) / f32(0xffffffffu);
 }
+
 fn rng_vec2(state: ptr<function, u32>) -> vec2f {
     return vec2f(rng_float(state), rng_float(state));
 }
+
 fn rng_vec3(state: ptr<function, u32>) -> vec3f {
     return vec3f(rng_float(state), rng_float(state), rng_float(state));
 }
+
 fn point_on_ray(ray: Ray, t: f32) -> vec3f {
   return ray.origin + t * ray.direction;
 }
+
 fn random_on_hemisphere(state: ptr<function, u32>, normal: vec3f) -> vec3f {
   let v = normalize(rng_vec3(state));
   if length(v) < EPSILON {
@@ -149,8 +152,8 @@ fn make_ray(uv: vec2f, state: ptr<function, u32>) -> Ray {
 
 fn intersect_node(r: Ray, node: Node) -> bool {
   let inv_d = 1.0 / r.direction;
-  let t0 = (node.bound_min.xyz - r.origin) * inv_d;
-  let t1 = (node.bound_max.xyz - r.origin) * inv_d;
+  let t0 = (node.bound_min - r.origin) * inv_d;
+  let t1 = (node.bound_max - r.origin) * inv_d;
   let tmin = min(t0, t1);
   let tmax = max(t0, t1);
   let tmin_final = max(max(tmin.x, tmin.y), tmin.z);
@@ -164,12 +167,13 @@ fn intersect_triangle(ray: Ray, i: u32, ret: ptr<function, HitRecord>) {
   let c = triangles[i].c.xyz;
   let normal = triangles[i].normal;
   let material = triangles[i].material;
+
   // Moller-Trumbore intersection algorithm
   let edge1 = b - a;
   let edge2 = c - a;
   let h = cross(ray.direction, edge2);
   let det = dot(edge1, h);
-  // Early exit for parallel rays
+
   if abs(det) < EPSILON {
     return;
   }
@@ -177,19 +181,20 @@ fn intersect_triangle(ray: Ray, i: u32, ret: ptr<function, HitRecord>) {
   let inv_det = 1.0 / det;
   let s = ray.origin - a;
   let u = inv_det * dot(s, h);
-  // Early exit for out-of-bounds U
+
   if u < 0.0 || u > 1.0 {
     return;
   }
 
   let q = cross(s, edge1);
   let v = inv_det * dot(ray.direction, q);
-  // Early exit for out-of-bounds V
+
   if v < 0.0 || u + v > 1.0 {
     return;
   }
+
   let t = inv_det * dot(edge2, q);
-  // Early exit for negative T or T beyond current hit
+
   if t < EPSILON || t >= (*ret).t {
     return;
   }
@@ -204,6 +209,7 @@ fn intersect_triangle(ray: Ray, i: u32, ret: ptr<function, HitRecord>) {
 fn reflect(v: vec3f, n: vec3f) -> vec3f {
     return v - 2*dot(v,n)*n;
 }
+
 fn refract(uv: vec3f, n: vec3f, etai_over_etat: f32) -> vec3f {
     let cos_theta = min(dot(-uv, n), 1.0);
     let r_out_perp =  etai_over_etat * (uv + cos_theta*n);
@@ -211,14 +217,13 @@ fn refract(uv: vec3f, n: vec3f, etai_over_etat: f32) -> vec3f {
     let r_out_parallel = -sqrt(abs(1.0 - len*len)) * n;
     return r_out_perp + r_out_parallel;
 }
+
 fn reflectance(cosine: f32, ref_idx: f32) -> f32 {
-    // Use Schlick's approximation for reflectance.
     var r0 = (1-ref_idx) / (1+ref_idx);
     r0 = r0*r0;
     return r0 + (1-r0)*pow((1 - cosine), 5.0);
 }
 
-// seems like the scatter function doesn't do well with triangles
 fn scatter(state: ptr<function, u32>, ray: Ray, hit: HitRecord) -> Ray {
   switch hit.material.id {
     case MAT_LAMBERTIAN: {
@@ -247,54 +252,61 @@ fn scatter(state: ptr<function, u32>, ray: Ray, hit: HitRecord) -> Ray {
       }
     }
     default: {
-      var ir = hit.material.params.x;
-      if hit.front_face {
-        ir = 1.0/ir;
-      }
-      let cos_theta = min(dot(-ray.direction, hit.normal), 1.0);
-      let sin_theta = sqrt(1.0 - cos_theta*cos_theta);
-      let cannot_refract = ir * sin_theta > 1.0;
-      if (cannot_refract || reflectance(cos_theta, ir) > fract(rng_float(state))) {
-          let direction = reflect(ray.direction, hit.normal);
-          return Ray(hit.point, normalize(direction));
-      } else {
-          let direction = refract(ray.direction, hit.normal, ir);
-          return Ray(hit.point, normalize(direction));
-      }
-      // return Ray(vec3f(), vec3f(0));
+      return Ray(vec3f(), vec3f(0));
     }
   }
 }
-fn intersect_all_node(ray: Ray) -> HitRecord {
-    var i = 1u;
-    let n = bvh_tree_size.x;
-    let m = bvh_tree_size.y;
-    var ret = EMPTY_HIT_RECORD;
-    var step = 0;
-    while step < 600 {
-        step++;
 
-        if i < n && intersect_node(ray, nodes[i]) {
-            i *= 2u; // go to first child
+// stack-based BVH traversal
+fn traverse_bvh(ray: Ray) -> HitRecord {
+    var ret = EMPTY_HIT_RECORD;
+
+    // Fixed-size stack (32 is enough for any reasonable BVH)
+    var stack: array<u32, 32>;
+    var stack_ptr = 0u;
+
+    // Start with root node
+    stack[0] = 0u;
+    stack_ptr = 1u;
+
+    var steps = 0u;
+    let max_steps = 600u;
+
+    while stack_ptr > 0u && steps < max_steps {
+        steps++;
+        stack_ptr--;
+        let node_idx = stack[stack_ptr];
+        if node_idx >= bvh_info.x {
+            continue;
+        }
+        let node = nodes[node_idx];
+
+        // Check ray-box intersection
+        if !intersect_node(ray, node) {
             continue;
         }
 
-        if i >= n {
-            let j = i - n;
-            if j >= m {
-                break;
-            }
-            intersect_triangle(ray, j, &ret);
-        }
+        // Check if this is a leaf node (MSB set)
+        if (node.left_first & 0x80000000u) != 0u {
+            // Leaf node - test triangles
+            let first_tri = node.left_first & 0x7FFFFFFFu;
+            let tri_count = node.tri_count;
 
-        // Move to next sibling or parent
-        while (i & 1u) == 1u {
-            i /= 2u; // return to parent
+            for (var i = first_tri; i < first_tri + tri_count; i++) {
+                if i < bvh_info.y {
+                    intersect_triangle(ray, i, &ret);
+                }
+            }
+        } else {
+            // Internal node - push children to stack
+            if stack_ptr + 2u <= 32u {
+                // Push far child first (so near is popped first)
+                stack[stack_ptr] = node.tri_count; // right child
+                stack_ptr++;
+                stack[stack_ptr] = node.left_first; // left child
+                stack_ptr++;
+            }
         }
-        if i == 0u {
-            break;
-        }
-        i++; // go to next sibling
     }
 
     return ret;
@@ -303,38 +315,35 @@ fn intersect_all_node(ray: Ray) -> HitRecord {
 fn trace(ray: Ray, state: ptr<function, u32>) -> vec3f {
   var attenuation = vec3f(1);
   var current_ray = ray;
-  for(var b = 0;b < BOUNCE_MAX; b++) {
-    var hit = intersect_all_node(current_ray);
+
+  for(var b = 0; b < BOUNCE_MAX; b++) {
+    var hit = traverse_bvh(current_ray);
     if abs(hit.t - FLT_MAX) < EPSILON {
       break;
     }
     current_ray = scatter(state, current_ray, hit);
     attenuation *= hit.material.albedo.rgb * 0.7;
   }
+
   let sky = mix(SKY, BLUE, ray.direction.y*0.5 + 0.5);
   return attenuation * sky;
-}
-
-
-@fragment
-fn fs_main_test_rng(@builtin(position) position: vec4f) -> @location(0) vec4f {
-  var rng_state = (u32(position.x)*resolution.y + u32(position.y)) * time;
-  return vec4f(rng_vec3(&rng_state), 1.0);
 }
 
 @fragment
 fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   var rng_state = (u32(position.x)*resolution.y + u32(position.y)) * time;
   let aspect_ratio = f32(resolution.x) / f32(resolution.y);
-  let position_aa = position.xy +normalize(rng_vec2(&rng_state));
+  let position_aa = position.xy + normalize(rng_vec2(&rng_state));
   var uv = position_aa / (vec2f(resolution) - vec2f(1));
   uv = (2 * uv - vec2(1)) * vec2(aspect_ratio, -1);
   let ray = make_ray(uv, &rng_state);
+
   var color = vec3f(0);
   for (var i = 0; i < SAMPLE_PER_FRAME; i += 1) {
     color += trace(ray, &rng_state);
   }
   color /= f32(SAMPLE_PER_FRAME);
+
   let x = u32(position.x);
   let y = u32(position.y);
   let i = (y * resolution.x + x)*3;
