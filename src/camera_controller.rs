@@ -65,8 +65,14 @@ impl OrbitCamera {
         let y = self.radius * self.phi.cos();
         let z = self.radius * self.phi.sin() * self.theta.sin();
         
-        self.position = self.target + Vec3::new(x, y, z);
-        self.has_moved = true;
+        let new_position = self.target + Vec3::new(x, y, z);
+        
+        // Only set has_moved if position actually changed
+        if (new_position - self.position).length_squared() > 1e-6 {
+            self.has_moved = true;
+        }
+        
+        self.position = new_position;
     }
     
     pub fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {

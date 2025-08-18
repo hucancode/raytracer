@@ -124,17 +124,31 @@ impl ApplicationHandler for App {
                     WindowEvent::RedrawRequested => {
                         // Update camera from GUI values
                         if let (Some(camera), Some(gui)) = (&mut self.camera, &self.gui) {
-                            // Update camera from GUI sliders
-                            camera.radius = gui.camera_radius;
-                            camera.theta = gui.camera_theta.to_radians();
-                            camera.phi = gui.camera_phi.to_radians();
-                            camera.fov = gui.fov;
-                            camera.update_position();
+                            // Check if GUI values actually changed
+                            let new_radius = gui.camera_radius;
+                            let new_theta = gui.camera_theta.to_radians();
+                            let new_phi = gui.camera_phi.to_radians();
+                            let new_fov = gui.fov;
                             
-                            if camera.has_moved {
+                            let epsilon = 1e-6;
+                            let changed = (camera.radius - new_radius).abs() > epsilon ||
+                                         (camera.theta - new_theta).abs() > epsilon ||
+                                         (camera.phi - new_phi).abs() > epsilon ||
+                                         (camera.fov - new_fov).abs() > epsilon;
+                            
+                            if changed {
+                                camera.radius = new_radius;
+                                camera.theta = new_theta;
+                                camera.phi = new_phi;
+                                camera.fov = new_fov;
+                                camera.update_position();
+                                scene.reset_frame_count();
+                                camera.reset_movement_flag();
+                            } else if camera.has_moved {
                                 scene.reset_frame_count();
                                 camera.reset_movement_flag();
                             }
+                            
                             scene.update_camera(camera.to_uniform());
                         }
                         
