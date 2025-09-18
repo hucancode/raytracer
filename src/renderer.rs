@@ -1,19 +1,18 @@
 use std::{borrow::Cow, cmp::max, mem::size_of, sync::Arc};
 use wgpu::{
-    BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingType, BufferBindingType, BufferDescriptor,
-    BufferUsages, Color, CommandEncoderDescriptor, Device, DeviceDescriptor, FragmentState,
-    Instance, Limits, LoadOp, MultisampleState, Operations,
-    PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState, Queue,
-    RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor,
-    RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Surface,
-    SurfaceConfiguration, Texture, TextureDescriptor, TextureFormat, TextureViewDescriptor,
-    VertexState,
+    BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
+    BindingType, BufferBindingType, BufferDescriptor, BufferUsages, Color,
+    CommandEncoderDescriptor, Device, DeviceDescriptor, FragmentState, Instance, Limits, LoadOp,
+    MultisampleState, Operations, PipelineCompilationOptions, PipelineLayoutDescriptor,
+    PrimitiveState, Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
+    RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource,
+    ShaderStages, StoreOp, Surface, SurfaceConfiguration, Texture, TextureDescriptor,
+    TextureFormat, TextureViewDescriptor, VertexState,
 };
 use winit::window::Window;
 
-use crate::scene::Camera;
 use crate::camera_controller::CameraUniform;
+use crate::scene::Camera;
 
 const MAX_IMAGE_BUFFER_SIZE: usize = 4096 * 2048;
 
@@ -73,12 +72,10 @@ impl Renderer {
                 limits.max_storage_buffer_binding_size = max_storage_buffer_size;
                 limits.max_storage_buffers_per_shader_stage = 4;
                 let (device, queue) = adapter
-                    .request_device(
-                        &DeviceDescriptor {
-                            required_limits: limits,
-                            ..Default::default()
-                        },
-                    )
+                    .request_device(&DeviceDescriptor {
+                        required_limits: limits,
+                        ..Default::default()
+                    })
                     .await
                     .expect("Failed to create device");
                 surface.configure(&device, &config);
@@ -107,12 +104,10 @@ impl Renderer {
                 limits.max_storage_buffer_binding_size = max_storage_buffer_size;
                 limits.max_storage_buffers_per_shader_stage = 4;
                 let (device, queue) = adapter
-                    .request_device(
-                        &DeviceDescriptor {
-                            required_limits: limits,
-                            ..Default::default()
-                        },
-                    )
+                    .request_device(&DeviceDescriptor {
+                        required_limits: limits,
+                        ..Default::default()
+                    })
                     .await
                     .expect("Failed to create device");
                 let texture = device.create_texture(&TextureDescriptor {
@@ -245,18 +240,8 @@ impl Renderer {
             0,
             bytemuck::bytes_of(&[config.width, config.height]),
         );
-        
-        // Initialize image buffer with zeros
-        let image_buffer_size = (config.width * config.height * 3) as usize;
-        let zeros = vec![0.0f32; image_buffer_size];
-        let image_buffer = &buffers[0].buffers[3];
-        queue.write_buffer(
-            image_buffer,
-            0,
-            bytemuck::cast_slice(&zeros),
-        );
-        
-        Self {
+
+        let mut renderer = Self {
             device,
             config,
             target,
@@ -265,7 +250,11 @@ impl Renderer {
             buffers,
             frame_count: 0,
             current_frame: None,
-        }
+        };
+
+        renderer.clear_image_buffer();
+
+        renderer
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -298,17 +287,9 @@ impl Renderer {
         let buffer = &self.buffers[0].buffers[0];
         self.queue
             .write_buffer(buffer, 0, bytemuck::bytes_of(&[width, height]));
-        
-        // Clear image buffer when resizing
-        let image_buffer_size = (width * height * 3) as usize;
-        let zeros = vec![0.0f32; image_buffer_size];
-        let image_buffer = &self.buffers[0].buffers[3];
-        self.queue.write_buffer(
-            image_buffer,
-            0,
-            bytemuck::cast_slice(&zeros),
-        );
-        
+
+        self.clear_image_buffer();
+
         self.frame_count = 0;
     }
 
@@ -326,25 +307,28 @@ impl Renderer {
         self.queue
             .write_buffer(buffer, 0, bytemuck::bytes_of(camera))
     }
-    
+
     pub fn update_camera_uniform(&mut self, camera: CameraUniform) {
         let buffer = &self.buffers[0].buffers[4];
         self.queue
             .write_buffer(buffer, 0, bytemuck::bytes_of(&camera))
     }
-    
+
     pub fn reset_frame_count(&mut self) {
         self.frame_count = 0;
-        
-        // Clear image buffer when resetting frame count
-        let image_buffer_size = (self.config.width * self.config.height * 3) as usize;
-        let zeros = vec![0.0f32; image_buffer_size];
+
+        self.clear_image_buffer();
+    }
+
+    fn clear_image_buffer(&mut self) {
         let image_buffer = &self.buffers[0].buffers[3];
-        self.queue.write_buffer(
-            image_buffer,
-            0,
-            bytemuck::cast_slice(&zeros),
-        );
+        let mut encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("clear image buffer"),
+            });
+        encoder.clear_buffer(image_buffer, 0, None);
+        self.queue.submit(Some(encoder.finish()));
     }
 
     pub fn write_buffer(&mut self, data: &[u8], buffer: usize) {
@@ -357,13 +341,13 @@ impl Renderer {
         self.render_scene(&mut encoder, &view);
         self.end_frame(encoder, view);
     }
-    
+
     pub fn begin_frame(&mut self) -> (wgpu::CommandEncoder, wgpu::TextureView) {
         self.set_frame_count(self.frame_count);
         let encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor::default());
-        
+
         let view = match &self.target {
             RenderTarget::Surface(surface) => {
                 let frame = surface.get_current_texture().unwrap();
@@ -375,10 +359,10 @@ impl Renderer {
                 texture.create_view(&TextureViewDescriptor::default())
             }
         };
-        
+
         (encoder, view)
     }
-    
+
     pub fn render_scene(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
             color_attachments: &[Some(RenderPassColorAttachment {
@@ -397,15 +381,15 @@ impl Renderer {
         }
         rpass.draw(0..6, 0..1);
     }
-    
+
     pub fn end_frame(&mut self, encoder: wgpu::CommandEncoder, _view: wgpu::TextureView) {
         self.queue.submit(Some(encoder.finish()));
-        
+
         // Present the frame we got in begin_frame
         if let Some(frame) = self.current_frame.take() {
             frame.present();
         }
-        
+
         self.frame_count += 1;
     }
 }
