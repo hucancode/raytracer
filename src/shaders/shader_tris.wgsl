@@ -120,14 +120,29 @@ fn point_on_ray(ray: Ray, t: f32) -> vec3f {
 }
 
 fn random_on_hemisphere(state: ptr<function, u32>, normal: vec3f) -> vec3f {
-  let v = normalize(rng_vec3(state));
-  if length(v) < EPSILON {
-    return normal;
+  var n = normal;
+  let len = length(n);
+  if len < EPSILON {
+    return vec3f(0.0, 1.0, 0.0);
   }
-  if(dot(v, normal) > 0) {
-    return v;
+  n = normalize(n);
+
+  let u = rng_float(state);
+  let v = rng_float(state);
+  let r = sqrt(u);
+  let phi = PI2 * v;
+  let local = vec3f(r * cos(phi), r * sin(phi), sqrt(max(0.0, 1.0 - u)));
+
+  var tangent = vec3f();
+  if abs(n.x) > abs(n.z) {
+    tangent = normalize(vec3f(-n.y, n.x, 0.0));
+  } else {
+    tangent = normalize(vec3f(0.0, -n.z, n.y));
   }
-  return -v;
+  let bitangent = cross(n, tangent);
+
+  let world = local.x * tangent + local.y * bitangent + local.z * n;
+  return normalize(world);
 }
 
 fn random_on_disk(state: ptr<function, u32>, radius: f32) -> vec3f {
@@ -228,7 +243,7 @@ fn scatter(state: ptr<function, u32>, ray: Ray, hit: HitRecord) -> Ray {
   switch hit.material.id {
     case MAT_LAMBERTIAN: {
       let direction = random_on_hemisphere(state, hit.normal);
-      return Ray(hit.point, direction);
+      return Ray(hit.point, normalize(direction));
     }
     case MAT_METAL: {
       let fuzziness = hit.material.params.x;
