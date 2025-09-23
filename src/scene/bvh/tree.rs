@@ -339,7 +339,7 @@ impl Tree {
             let a = Vec4::from_array(mesh.vertices[t[0] as usize].position);
             let b = Vec4::from_array(mesh.vertices[t[1] as usize].position);
             let c = Vec4::from_array(mesh.vertices[t[2] as usize].position);
-            let center3x = (a + b + c).xyz();
+            let center3x = (a + b + c).xyz() / 3.0;
             self.centroids.push(center3x);
             self.triangles.push(Triangle {
                 a,
