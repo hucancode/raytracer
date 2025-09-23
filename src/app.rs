@@ -73,7 +73,9 @@ impl App {
             gui.camera_theta = camera.theta.to_degrees();
             gui.camera_phi = camera.phi.to_degrees();
             gui.fov = camera.fov.to_degrees();
-            
+            gui.blur_amount = camera.focal_blur_amount;
+            gui.focal_length = camera.focal_length;
+
             self.gui = Some(gui);
         }
     }
@@ -128,19 +130,25 @@ impl ApplicationHandler for App {
                             let new_radius = gui.camera_radius;
                             let new_theta = gui.camera_theta.to_radians();
                             let new_phi = gui.camera_phi.to_radians();
-                            let new_fov = gui.fov;
-                            
+                            let new_fov = gui.fov.to_radians();
+                            let new_blur = gui.blur_amount;
+                            let new_focal_length = gui.focal_length;
+
                             let epsilon = 1e-6;
-                            let changed = (camera.radius - new_radius).abs() > epsilon ||
-                                         (camera.theta - new_theta).abs() > epsilon ||
-                                         (camera.phi - new_phi).abs() > epsilon ||
-                                         (camera.fov - new_fov).abs() > epsilon;
-                            
+                            let changed = (camera.radius - new_radius).abs() > epsilon
+                                || (camera.theta - new_theta).abs() > epsilon
+                                || (camera.phi - new_phi).abs() > epsilon
+                                || (camera.fov - new_fov).abs() > epsilon
+                                || (camera.focal_blur_amount - new_blur).abs() > epsilon
+                                || (camera.focal_length - new_focal_length).abs() > epsilon;
+
                             if changed {
                                 camera.radius = new_radius;
                                 camera.theta = new_theta;
                                 camera.phi = new_phi;
                                 camera.fov = new_fov;
+                                camera.focal_blur_amount = new_blur;
+                                camera.focal_length = new_focal_length;
                                 camera.update_position();
                                 scene.reset_frame_count();
                                 camera.reset_movement_flag();
@@ -173,6 +181,8 @@ impl ApplicationHandler for App {
                                 gui.camera_radius = camera.radius;
                                 gui.camera_theta = camera.theta.to_degrees();
                                 gui.camera_phi = camera.phi.to_degrees();
+                                gui.blur_amount = camera.focal_blur_amount;
+                                gui.focal_length = camera.focal_length;
                             }
                         }
                     }
@@ -184,6 +194,8 @@ impl ApplicationHandler for App {
                                 gui.camera_radius = camera.radius;
                                 gui.camera_theta = camera.theta.to_degrees();
                                 gui.camera_phi = camera.phi.to_degrees();
+                                gui.blur_amount = camera.focal_blur_amount;
+                                gui.focal_length = camera.focal_length;
                             }
                         }
                     }
@@ -195,6 +207,8 @@ impl ApplicationHandler for App {
                                 gui.camera_radius = camera.radius;
                                 gui.camera_theta = camera.theta.to_degrees();
                                 gui.camera_phi = camera.phi.to_degrees();
+                                gui.blur_amount = camera.focal_blur_amount;
+                                gui.focal_length = camera.focal_length;
                             }
                         }
                     }

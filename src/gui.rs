@@ -13,6 +13,8 @@ pub struct GuiState {
     pub camera_theta: f32,
     pub camera_phi: f32,
     pub fov: f32,
+    pub blur_amount: f32,
+    pub focal_length: f32,
 }
 
 impl GuiState {
@@ -35,6 +37,8 @@ impl GuiState {
             camera_theta: 0.0,
             camera_phi: 0.0,
             fov: 60.0,
+            blur_amount: 0.0,
+            focal_length: 10.0,
         }
     }
 
@@ -50,28 +54,43 @@ impl GuiState {
         let mut camera_theta = self.camera_theta;
         let mut camera_phi = self.camera_phi;
         let mut fov = self.fov;
-        
+        let mut blur_amount = self.blur_amount;
+        let mut focal_length = self.focal_length;
+
         let output = self.state.egui_ctx().run(input, |ctx| {
             egui::Window::new("Debug Panel")
                 .open(&mut show_debug)
                 .show(ctx, |ui| {
                     ui.heading("Camera Controls");
-                    
-                    ui.add(egui::Slider::new(&mut camera_radius, 1.0..=50.0)
-                        .text("Radius"));
-                    
-                    ui.add(egui::Slider::new(&mut camera_theta, -180.0..=180.0)
-                        .text("Theta (deg)")
-                        .suffix("°"));
-                    
-                    ui.add(egui::Slider::new(&mut camera_phi, -89.0..=89.0)
-                        .text("Phi (deg)")
-                        .suffix("°"));
-                    
-                    ui.add(egui::Slider::new(&mut fov, 30.0..=120.0)
-                        .text("FOV")
-                        .suffix("°"));
-                    
+
+                    ui.add(egui::Slider::new(&mut camera_radius, 1.0..=50.0).text("Radius"));
+
+                    ui.add(
+                        egui::Slider::new(&mut camera_theta, -180.0..=180.0)
+                            .text("Theta (deg)")
+                            .suffix("°"),
+                    );
+
+                    ui.add(
+                        egui::Slider::new(&mut camera_phi, -89.0..=89.0)
+                            .text("Phi (deg)")
+                            .suffix("°"),
+                    );
+
+                    ui.add(
+                        egui::Slider::new(&mut fov, 30.0..=120.0)
+                            .text("FOV")
+                            .suffix("°"),
+                    );
+
+                    ui.add(egui::Slider::new(&mut blur_amount, 0.0..=0.2).text("Blur Radius"));
+
+                    ui.add(
+                        egui::Slider::new(&mut focal_length, 0.5..=20.0)
+                            .text("Focal Range")
+                            .suffix(" m"),
+                    );
+
                     ui.separator();
                     
                     ui.label(egui::RichText::new("Controls:").strong());
@@ -81,12 +100,17 @@ impl GuiState {
         });
         
         // Update self with the modified values if they changed
-        if self.camera_radius != camera_radius || 
-           self.camera_theta != camera_theta || 
-           self.camera_phi != camera_phi || 
-           self.fov != fov {
-            println!("GUI values changed: radius={}, theta={}, phi={}, fov={}", 
-                     camera_radius, camera_theta, camera_phi, fov);
+        if self.camera_radius != camera_radius
+            || self.camera_theta != camera_theta
+            || self.camera_phi != camera_phi
+            || self.fov != fov
+            || (self.blur_amount - blur_amount).abs() > f32::EPSILON
+            || (self.focal_length - focal_length).abs() > f32::EPSILON
+        {
+            println!(
+                "GUI values changed: radius={}, theta={}, phi={}, fov={}, blur={}, focal_length={}",
+                camera_radius, camera_theta, camera_phi, fov, blur_amount, focal_length
+            );
         }
         
         self.show_debug = show_debug;
@@ -94,7 +118,9 @@ impl GuiState {
         self.camera_theta = camera_theta;
         self.camera_phi = camera_phi;
         self.fov = fov;
-        
+        self.blur_amount = blur_amount;
+        self.focal_length = focal_length;
+
         output
     }
 
@@ -112,15 +138,21 @@ impl GuiState {
             pixels_per_point: window.scale_factor() as f32,
         };
 
-        self.state.handle_platform_output(window, output.platform_output);
+        self.state
+            .handle_platform_output(window, output.platform_output);
 
-        let paint_jobs = self.state.egui_ctx().tessellate(output.shapes, output.pixels_per_point);
+        let paint_jobs = self
+            .state
+            .egui_ctx()
+            .tessellate(output.shapes, output.pixels_per_point);
 
         for (id, image_delta) in &output.textures_delta.set {
-            self.renderer.update_texture(device, queue, *id, &image_delta);
+            self.renderer
+                .update_texture(device, queue, *id, &image_delta);
         }
 
-        self.renderer.update_buffers(device, queue, encoder, &paint_jobs, &screen_descriptor);
+        self.renderer
+            .update_buffers(device, queue, encoder, &paint_jobs, &screen_descriptor);
 
         {
             let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -139,7 +171,8 @@ impl GuiState {
             });
 
             let mut render_pass = render_pass.forget_lifetime();
-            self.renderer.render(&mut render_pass, &paint_jobs, &screen_descriptor);
+            self.renderer
+                .render(&mut render_pass, &paint_jobs, &screen_descriptor);
         }
 
         for id in &output.textures_delta.free {

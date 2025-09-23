@@ -11,9 +11,11 @@ pub struct OrbitCamera {
     
     // Orbit controls
     pub radius: f32,
-    pub theta: f32,  // Horizontal angle
-    pub phi: f32,    // Vertical angle
-    
+    pub theta: f32, // Horizontal angle
+    pub phi: f32,   // Vertical angle
+    pub focal_length: f32,
+    pub focal_blur_amount: f32,
+
     // Mouse state
     is_dragging: bool,
     last_mouse_pos: PhysicalPosition<f64>,
@@ -43,6 +45,8 @@ impl OrbitCamera {
             radius,
             theta,
             phi,
+            focal_length: 10.0,
+            focal_blur_amount: 0.0,
             is_dragging: false,
             last_mouse_pos: PhysicalPosition::new(0.0, 0.0),
             zoom_speed: 0.1,
@@ -127,8 +131,8 @@ impl OrbitCamera {
             direction: forward.extend(0.0),
             up: up.extend(0.0),
             right: right.extend(0.0),
-            focal_length: 10.0,
-            focal_blur_amount: 0.0,
+            focal_length: self.focal_length,
+            focal_blur_amount: self.focal_blur_amount,
             fov: self.fov,
             _padding: 0.0,
         }
