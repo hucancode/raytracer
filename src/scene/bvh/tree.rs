@@ -81,6 +81,7 @@ pub struct Tree {
     pub nodes: Vec<Node>,
     pub triangles: Vec<Triangle>,
     pub materials: Vec<Material>,
+    pub centroids: Vec<Vec3>,
 }
 
 impl From<Mesh> for Tree {
@@ -98,6 +99,7 @@ impl Tree {
             nodes: Vec::new(),
             materials: Vec::new(),
             sizes: [0, 0],
+            centroids: Vec::new(),
         }
     }
     
@@ -119,14 +121,17 @@ impl Tree {
         
         // Reorder triangles based on the final ordering
         let mut new_triangles = Vec::with_capacity(triangle_count);
+        let mut new_centroids = Vec::with_capacity(triangle_count);
         for &idx in &indices {
             let mut tri = self.triangles[idx];
             // Compute normal
             let normal = (tri.b - tri.a).truncate().cross((tri.c - tri.a).truncate()).normalize();
             tri.custom = normal;
             new_triangles.push(tri);
+            new_centroids.push(self.centroids[idx]);
         }
         self.triangles = new_triangles;
+        self.centroids = new_centroids;
         
         // Update sizes for shader
         self.sizes = [self.nodes.len() as u32, self.triangles.len() as u32];
@@ -176,62 +181,99 @@ impl Tree {
         let mut best_cost = f32::INFINITY;
         
         const NUM_BINS: usize = 32;
-        
+
         for axis in 0..3 {
             let min_val = bounds_min[axis];
             let max_val = bounds_max[axis];
-            
+
             if (max_val - min_val).abs() < 0.001 {
                 continue;
             }
-            
-            // Try different split positions
-            for i in 1..NUM_BINS {
-                let t = i as f32 / NUM_BINS as f32;
-                let split_pos = min_val + t * (max_val - min_val);
-                
-                // Count triangles and compute bounds for each side
-                let mut left_count = 0;
-                let mut right_count = 0;
-                let mut left_bounds_min = Vec3::splat(f32::INFINITY);
-                let mut left_bounds_max = Vec3::splat(f32::NEG_INFINITY);
-                let mut right_bounds_min = Vec3::splat(f32::INFINITY);
-                let mut right_bounds_max = Vec3::splat(f32::NEG_INFINITY);
-                
-                for j in start..end {
-                    let tri = &self.triangles[indices[j]];
-                    let center = (tri.a.truncate() + tri.b.truncate() + tri.c.truncate()) / 3.0;
-                    
-                    if center[axis] < split_pos {
-                        left_count += 1;
-                        left_bounds_min = left_bounds_min.min(tri.a.truncate()).min(tri.b.truncate()).min(tri.c.truncate());
-                        left_bounds_max = left_bounds_max.max(tri.a.truncate()).max(tri.b.truncate()).max(tri.c.truncate());
-                    } else {
-                        right_count += 1;
-                        right_bounds_min = right_bounds_min.min(tri.a.truncate()).min(tri.b.truncate()).min(tri.c.truncate());
-                        right_bounds_max = right_bounds_max.max(tri.a.truncate()).max(tri.b.truncate()).max(tri.c.truncate());
-                    }
+
+            let bin_size = (max_val - min_val) / NUM_BINS as f32;
+            if bin_size <= 0.0 {
+                continue;
+            }
+
+            let mut bin_counts = [0u32; NUM_BINS];
+            let mut bin_bounds_min = vec![Vec3::splat(f32::INFINITY); NUM_BINS];
+            let mut bin_bounds_max = vec![Vec3::splat(f32::NEG_INFINITY); NUM_BINS];
+
+            for j in start..end {
+                let tri_idx = indices[j];
+                let center = self.centroids[tri_idx];
+                let mut bin = ((center[axis] - min_val) / bin_size) as isize;
+                if bin < 0 {
+                    bin = 0;
                 }
-                
+                if bin as usize >= NUM_BINS {
+                    bin = (NUM_BINS - 1) as isize;
+                }
+                let bin = bin as usize;
+                bin_counts[bin] += 1;
+
+                let tri = &self.triangles[tri_idx];
+                let ta = tri.a.truncate();
+                let tb = tri.b.truncate();
+                let tc = tri.c.truncate();
+                let tri_min = ta.min(tb).min(tc);
+                let tri_max = ta.max(tb).max(tc);
+                bin_bounds_min[bin] = bin_bounds_min[bin].min(tri_min);
+                bin_bounds_max[bin] = bin_bounds_max[bin].max(tri_max);
+            }
+
+            let mut left_counts = [0u32; NUM_BINS];
+            let mut left_bounds_min = vec![Vec3::splat(f32::INFINITY); NUM_BINS];
+            let mut left_bounds_max = vec![Vec3::splat(f32::NEG_INFINITY); NUM_BINS];
+            let mut running_count = 0u32;
+            let mut running_min = Vec3::splat(f32::INFINITY);
+            let mut running_max = Vec3::splat(f32::NEG_INFINITY);
+            for i in 0..NUM_BINS {
+                running_count += bin_counts[i];
+                running_min = running_min.min(bin_bounds_min[i]);
+                running_max = running_max.max(bin_bounds_max[i]);
+                left_counts[i] = running_count;
+                left_bounds_min[i] = running_min;
+                left_bounds_max[i] = running_max;
+            }
+
+            let mut right_counts = [0u32; NUM_BINS];
+            let mut right_bounds_min = vec![Vec3::splat(f32::INFINITY); NUM_BINS];
+            let mut right_bounds_max = vec![Vec3::splat(f32::NEG_INFINITY); NUM_BINS];
+            running_count = 0;
+            running_min = Vec3::splat(f32::INFINITY);
+            running_max = Vec3::splat(f32::NEG_INFINITY);
+            for i in (0..NUM_BINS).rev() {
+                running_count += bin_counts[i];
+                running_min = running_min.min(bin_bounds_min[i]);
+                running_max = running_max.max(bin_bounds_max[i]);
+                right_counts[i] = running_count;
+                right_bounds_min[i] = running_min;
+                right_bounds_max[i] = running_max;
+            }
+
+            let parent_area = surface_area(bounds_min, bounds_max);
+            const TRAVERSAL_COST: f32 = 1.0;
+            const INTERSECTION_COST: f32 = 1.0;
+
+            for i in 0..(NUM_BINS - 1) {
+                let left_count = left_counts[i];
+                let right_count = right_counts[i + 1];
                 if left_count == 0 || right_count == 0 {
                     continue;
                 }
-                
-                // Compute SAH cost
-                let left_area = surface_area(&left_bounds_min, &left_bounds_max);
-                let right_area = surface_area(&right_bounds_min, &right_bounds_max);
-                let parent_area = surface_area(bounds_min, bounds_max);
-                
-                const TRAVERSAL_COST: f32 = 1.0;
-                const INTERSECTION_COST: f32 = 1.0;
-                
-                let cost = TRAVERSAL_COST + INTERSECTION_COST * 
-                    (left_count as f32 * left_area + right_count as f32 * right_area) / parent_area;
-                
+
+                let left_area = surface_area(&left_bounds_min[i], &left_bounds_max[i]);
+                let right_area = surface_area(&right_bounds_min[i + 1], &right_bounds_max[i + 1]);
+                let cost = TRAVERSAL_COST
+                    + INTERSECTION_COST
+                        * (left_count as f32 * left_area + right_count as f32 * right_area)
+                        / parent_area;
+
                 if cost < best_cost {
                     best_cost = cost;
                     best_axis = axis;
-                    best_pos = split_pos;
+                    best_pos = min_val + bin_size * (i + 1) as f32;
                 }
             }
         }
@@ -244,9 +286,8 @@ impl Tree {
         let mut right = end - 1;
         
         while left <= right {
-            let tri = &self.triangles[indices[left]];
-            let center = (tri.a.truncate() + tri.b.truncate() + tri.c.truncate()) / 3.0;
-            
+            let center = self.centroids[indices[left]];
+
             if center[axis] < split_pos {
                 left += 1;
             } else {
@@ -294,19 +335,20 @@ impl Tree {
     pub fn add_mesh(&mut self, mesh: Mesh) {
         let material = self.materials.len() as u32;
         self.materials.push(mesh.material);
-        self.triangles.extend(mesh.indices.chunks_exact(3).map(|t| {
+        for t in mesh.indices.chunks_exact(3) {
             let a = Vec4::from_array(mesh.vertices[t[0] as usize].position);
             let b = Vec4::from_array(mesh.vertices[t[1] as usize].position);
             let c = Vec4::from_array(mesh.vertices[t[2] as usize].position);
             let center3x = (a + b + c).xyz();
-            Triangle {
+            self.centroids.push(center3x);
+            self.triangles.push(Triangle {
                 a,
                 b,
                 c,
                 material,
                 custom: center3x,
-            }
-        }));
+            });
+        }
     }
 }
 
