@@ -323,6 +323,16 @@ fn trace(ray: Ray, state: ptr<function, u32>) -> vec3f {
     }
     current_ray = scatter(state, current_ray, hit);
     attenuation *= hit.material.albedo.rgb * 0.7;
+
+    if (b > 2) {
+      let luminance = dot(attenuation, vec3f(0.2126, 0.7152, 0.0722));
+      let survival_probability = clamp(luminance, 0.05, 1.0);
+      let random_sample = rng_float(state);
+      if (random_sample > survival_probability) {
+        break;
+      }
+      attenuation /= survival_probability;
+    }
   }
 
   let sky = mix(SKY, BLUE, ray.direction.y*0.5 + 0.5);
