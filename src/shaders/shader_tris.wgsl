@@ -150,15 +150,14 @@ fn make_ray(uv: vec2f, state: ptr<function, u32>) -> Ray {
   return Ray(origin.xyz, direction.xyz);
 }
 
-fn intersect_node(r: Ray, node: Node) -> bool {
-  let inv_d = 1.0 / r.direction;
-  let t0 = (node.bound_min - r.origin) * inv_d;
-  let t1 = (node.bound_max - r.origin) * inv_d;
+fn intersect_node(ray: Ray, inv_dir: vec3f, node: Node) -> vec2f {
+  let t0 = (node.bound_min - ray.origin) * inv_dir;
+  let t1 = (node.bound_max - ray.origin) * inv_dir;
   let tmin = min(t0, t1);
   let tmax = max(t0, t1);
   let tmin_final = max(max(tmin.x, tmin.y), tmin.z);
   let tmax_final = min(min(tmax.x, tmax.y), tmax.z);
-  return tmin_final <= tmax_final && tmax_final >= 0.0;
+  return vec2f(tmin_final, tmax_final);
 }
 
 fn intersect_triangle(ray: Ray, i: u32, ret: ptr<function, HitRecord>) {
@@ -271,6 +270,7 @@ fn traverse_bvh(ray: Ray) -> HitRecord {
 
     var steps = 0u;
     let max_steps = 600u;
+    let inv_dir = 1.0 / ray.direction;
 
     while stack_ptr > 0u && steps < max_steps {
         steps++;
@@ -282,7 +282,10 @@ fn traverse_bvh(ray: Ray) -> HitRecord {
         let node = nodes[node_idx];
 
         // Check ray-box intersection
-        if !intersect_node(ray, node) {
+        let node_hit = intersect_node(ray, inv_dir, node);
+        let node_tmin = node_hit.x;
+        let node_tmax = node_hit.y;
+        if node_tmin > node_tmax || node_tmax < 0.0 || node_tmin > ret.t {
             continue;
         }
 
@@ -299,12 +302,56 @@ fn traverse_bvh(ray: Ray) -> HitRecord {
             }
         } else {
             // Internal node - push children to stack
-            if stack_ptr + 2u <= 32u {
-                // Push far child first (so near is popped first)
-                stack[stack_ptr] = node.tri_count; // right child
-                stack_ptr++;
-                stack[stack_ptr] = node.left_first; // left child
-                stack_ptr++;
+            let left_idx = node.left_first;
+            let right_idx = node.tri_count;
+
+            var left_tmin = FLT_MAX;
+            var right_tmin = FLT_MAX;
+            var left_valid = false;
+            var right_valid = false;
+
+            if left_idx < bvh_info.x {
+                let left_node = nodes[left_idx];
+                let left_hit = intersect_node(ray, inv_dir, left_node);
+                let left_tmax = left_hit.y;
+                left_tmin = left_hit.x;
+                left_valid = left_tmin <= left_tmax && left_tmax >= 0.0 && left_tmin <= ret.t;
+            }
+
+            if right_idx < bvh_info.x {
+                let right_node = nodes[right_idx];
+                let right_hit = intersect_node(ray, inv_dir, right_node);
+                let right_tmax = right_hit.y;
+                right_tmin = right_hit.x;
+                right_valid = right_tmin <= right_tmax && right_tmax >= 0.0 && right_tmin <= ret.t;
+            }
+
+            if left_valid && right_valid {
+                if left_tmin <= right_tmin {
+                    if stack_ptr + 2u <= 32u {
+                        stack[stack_ptr] = right_idx;
+                        stack_ptr++;
+                        stack[stack_ptr] = left_idx;
+                        stack_ptr++;
+                    }
+                } else {
+                    if stack_ptr + 2u <= 32u {
+                        stack[stack_ptr] = left_idx;
+                        stack_ptr++;
+                        stack[stack_ptr] = right_idx;
+                        stack_ptr++;
+                    }
+                }
+            } else if left_valid {
+                if stack_ptr + 1u <= 32u {
+                    stack[stack_ptr] = left_idx;
+                    stack_ptr++;
+                }
+            } else if right_valid {
+                if stack_ptr + 1u <= 32u {
+                    stack[stack_ptr] = right_idx;
+                    stack_ptr++;
+                }
             }
         }
     }
