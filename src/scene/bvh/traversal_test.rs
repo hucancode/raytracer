@@ -314,6 +314,7 @@ mod tests {
         println!("\nStress Test: Synthetic large mesh");
         
         let mut triangles = Vec::new();
+        let mut centroids = Vec::new();
         let material = 0u32;
         
         // Create a grid of triangles
@@ -333,30 +334,34 @@ mod tests {
                     let c = Vec4::new(x + 1.0, y + 1.0, z, 1.0);
                     let d = Vec4::new(x, y + 1.0, z, 1.0);
                     
+                    let centroid = Vec3::new(x + 0.5, y + 0.5, z);
                     triangles.push(Triangle {
                         a,
                         b,
                         c,
                         material,
-                        custom: Vec3::new(x + 0.5, y + 0.5, z),
+                        custom: centroid,
                     });
-                    
+                    centroids.push(centroid);
+
                     triangles.push(Triangle {
                         a,
                         b: c,
                         c: d,
                         material,
-                        custom: Vec3::new(x + 0.5, y + 0.5, z),
+                        custom: centroid,
                     });
+                    centroids.push(centroid);
                 }
             }
         }
-        
+
         let mut tree = Tree {
             triangles,
             nodes: Vec::new(),
             materials: vec![Material::new_lambertian(Vec3::new(0.5, 0.5, 0.5))],
             sizes: [0, 0],
+            centroids,
         };
         
         tree.build();
