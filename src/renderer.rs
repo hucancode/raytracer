@@ -372,6 +372,7 @@ impl Renderer {
                     load: LoadOp::Clear(Color::BLACK),
                     store: StoreOp::Store,
                 },
+                depth_slice: None,
             })],
             ..Default::default()
         });

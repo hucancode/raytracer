@@ -1,5 +1,5 @@
 use egui::Context;
-use egui_wgpu::ScreenDescriptor;
+use egui_wgpu::{RendererOptions, ScreenDescriptor};
 use egui_winit::State as EguiState;
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 use winit::event::WindowEvent;
@@ -18,17 +18,12 @@ pub struct GuiState {
 }
 
 impl GuiState {
-    pub fn new(
-        device: &Device,
-        format: TextureFormat,
-        window: &Window,
-        samples: u32,
-    ) -> Self {
+    pub fn new(device: &Device, format: TextureFormat, window: &Window) -> Self {
         let viewport_id = egui::ViewportId::ROOT;
         let state = EguiState::new(Context::default(), viewport_id, window, None, None, None);
-        
-        let renderer = egui_wgpu::Renderer::new(device, format, None, samples, false);
-        
+
+        let renderer = egui_wgpu::Renderer::new(device, format, RendererOptions::default());
+
         Self {
             state,
             renderer,
@@ -164,6 +159,7 @@ impl GuiState {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,

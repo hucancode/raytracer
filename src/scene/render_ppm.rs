@@ -26,7 +26,7 @@ fn copy_image_buffer(renderer: &mut Renderer) -> Vec<u8> {
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
         tx.send(result.is_ok()).unwrap()
     });
-    let _ = device.poll(wgpu::MaintainBase::Wait);
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
     let ret = if rx.recv().unwrap_or(false) {
         buffer_slice.get_mapped_range().to_vec()
     } else {

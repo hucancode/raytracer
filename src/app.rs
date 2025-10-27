@@ -65,7 +65,6 @@ impl App {
                 scene.get_device(),
                 scene.get_format(),
                 window,
-                1, // samples
             );
             
             // Sync GUI values with camera
